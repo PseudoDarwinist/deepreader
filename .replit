@@ -1,6 +1,7 @@
 modules = ["web", "python-3.11"]
 [agent]
 expertMode = true
+integrations = ["python_openai_ai_integrations:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
@@ -16,15 +17,15 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Static Server"
+args = "Flask Server"
 
 [[workflows.workflow]]
-name = "Static Server"
+name = "Flask Server"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python3 -m http.server 5000 --bind 0.0.0.0"
+args = "python main.py"
 waitForPort = 5000
 
 [workflows.workflow.metadata]
@@ -35,5 +36,6 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-deploymentTarget = "static"
+deploymentTarget = "autoscale"
 publicDir = "."
+run = ["gunicorn", "--bind=0.0.0.0:5000", "--reuse-port", "main:app"]

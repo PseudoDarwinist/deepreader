@@ -1863,9 +1863,7 @@
                 <!-- Article Header -->
                 <div class="article-header">
                     <div class="article-meta">
-                        <span class="meta-tag">Engineering</span>
-                        <span class="meta-tag">Postmortem</span>
-                        <span class="meta-tag">Infrastructure</span>
+                        <span class="meta-tag" id="metaSource">Article</span>
                     </div>
                     <h1 class="article-title" id="articleTitle">A Postmortem of Three Recent Issues</h1>
                     <div class="article-stats">
@@ -2133,172 +2131,8 @@
     </div>
 
     <script>
-        // ===== DATA =====
-        const articleData = {
-            title: "A Postmortem of Three Recent Issues",
-            source: "Anthropic Engineering",
-            summary: `Between August and early September 2025, Anthropic experienced three overlapping infrastructure bugs that intermittently degraded Claude's response quality. This wasn't about reducing quality due to demand—these were genuine infrastructure bugs that affected how Claude processed requests across different hardware platforms (AWS Trainium, NVIDIA GPUs, Google TPUs). The postmortem reveals the complexity of serving AI at scale and the challenges of maintaining consistent quality across distributed systems.`,
-            concepts: [
-                {
-                    id: 1,
-                    name: "Context Window Routing",
-                    complexity: "medium",
-                    category: "Infrastructure",
-                    summary: "How requests are directed to appropriate servers based on context length requirements",
-                    eli5: "Imagine a library with different sized reading rooms. Small questions go to small rooms, big questions need the big room. But someone accidentally put signs pointing small questions to the big room, and the big room wasn't ready for them.",
-                    technical: "Requests to Claude are routed to different server configurations based on the expected context window size. The 1M token context window servers have different memory and processing configurations than standard servers. A routing misconfiguration caused requests to be sent to servers configured for a different context window than requested.",
-                    deep: "The routing layer uses a combination of request metadata and load balancing algorithms to direct traffic. When preparing infrastructure for the new 1M token context window, certain routing rules were updated prematurely. The initial bug affected 0.8% of Sonnet 4 requests, but a load balancing change on August 29 amplified this to 16% at peak. The 'sticky' nature of routing meant affected users remained on problematic servers for follow-up requests.",
-                    firstPrinciples: [
-                        "What is load balancing and why is it needed?",
-                        "How do distributed systems route requests?",
-                        "What is a context window in language models?"
-                    ]
-                },
-                {
-                    id: 2,
-                    name: "XLA:TPU Compilation",
-                    complexity: "high",
-                    category: "Deep ML",
-                    summary: "How machine learning code gets optimized and compiled for TPU hardware",
-                    eli5: "Think of XLA as a translator that converts recipes into a specific kitchen's language. But this translator was making tiny math mistakes—like saying '2.001 cups' instead of '2 cups'. Usually no big deal, but sometimes it made the chef pick the completely wrong ingredient.",
-                    technical: "XLA (Accelerated Linear Algebra) is a compiler that optimizes machine learning computations for specific hardware like Google's TPUs. It transforms high-level operations into efficient hardware instructions. The bug involved precision mismatches between bf16 (brain floating point) and fp32 (standard 32-bit floating point) operations.",
-                    deep: "Claude models perform probability calculations in bf16 for efficiency, but TPU vector processors are fp32-native. XLA optimizes by converting some operations to fp32, controlled by the `xla_allow_excess_precision` flag. The bug manifested when precision inconsistencies caused disagreement about which token had the highest probability. An 'approximate top-k' operation sometimes returned completely wrong results for specific batch sizes and model configurations.",
-                    firstPrinciples: [
-                        "What is floating point precision?",
-                        "How do compilers optimize code?",
-                        "What is bf16 vs fp32?",
-                        "How do language models select output tokens?"
-                    ]
-                },
-                {
-                    id: 3,
-                    name: "Token Selection (Top-k Sampling)",
-                    complexity: "medium",
-                    category: "ML Fundamentals",
-                    summary: "How language models choose the next word from probability distributions",
-                    eli5: "Imagine you're playing a word game where you need to pick the next word in a sentence. You have a bag of words, each with different chances of being picked. Top-k sampling means you only consider the 10 most likely words, ignoring weird options like 'banana' when you're writing about code.",
-                    technical: "Top-k sampling is a decoding strategy where the model only considers the k tokens with highest probability at each step, then samples from this reduced distribution. This balances between pure greedy decoding (always pick highest) and unrestricted sampling (consider all tokens).",
-                    deep: "The bug occurred in the 'approximate top-k' implementation, which uses a faster but less precise algorithm. When mixed precision arithmetic caused slight probability differences, some operations disagreed on which tokens belonged in the top-k set. In edge cases, the highest probability token could be eliminated entirely from consideration, leading to unexpected outputs like Thai characters in English text.",
-                    firstPrinciples: [
-                        "What is a probability distribution?",
-                        "How do neural networks generate text?",
-                        "What is the difference between greedy and sampling decoding?"
-                    ]
-                },
-                {
-                    id: 4,
-                    name: "Output Corruption Bug",
-                    complexity: "medium",
-                    category: "Bug Analysis",
-                    summary: "A runtime optimization error causing unexpected characters in responses",
-                    eli5: "Imagine a printer that sometimes glitches and prints Chinese characters when you're writing in English. The printer's internal settings got scrambled, so occasionally it would 'think' a Chinese character was more likely than the English letter you wanted.",
-                    technical: "A misconfiguration on Claude API TPU servers caused runtime performance optimization errors. The system occasionally assigned high probability to tokens that should rarely occur given the context—producing Thai/Chinese characters in English responses or syntax errors in code.",
-                    deep: "The corruption was intermittent and depended on specific combinations of input patterns and server states. Detection was complicated by the fact that Claude's error recovery mechanisms often masked single corrupted tokens. The bug was identified and rolled back September 2, with additional detection tests added to catch unexpected character outputs in deployment testing.",
-                    firstPrinciples: [
-                        "How do runtime optimizations work?",
-                        "What is token encoding in language models?",
-                        "How do systems detect anomalous outputs?"
-                    ]
-                },
-                {
-                    id: 5,
-                    name: "bf16 vs fp32 Precision",
-                    complexity: "high",
-                    category: "Deep ML",
-                    summary: "Different number formats used in machine learning and their trade-offs",
-                    eli5: "Imagine you're measuring ingredients. fp32 is like using a scientific scale that shows 3.14159265 grams. bf16 is like a kitchen scale that just shows 3.1 grams. Usually close enough! But sometimes that tiny difference—when you're comparing two almost-equal things—makes you pick the wrong one.",
-                    technical: "bf16 (brain floating point 16) uses 1 sign bit, 8 exponent bits, and 7 mantissa bits, offering the same range as fp32 but with reduced precision. fp32 uses 1 sign bit, 8 exponent bits, and 23 mantissa bits. bf16 is popular in ML because it halves memory usage while maintaining numeric range.",
-                    deep: "The precision mismatch becomes critical when comparing very close values. If two tokens have probabilities 0.1234567 and 0.1234568 in fp32, they might both round to 0.1235 in bf16. When one operation uses fp32 and another uses bf16, they can disagree on which is larger. The XLA compiler's `xla_allow_excess_precision` flag controls whether operations can use higher precision than requested.",
-                    firstPrinciples: [
-                        "How do computers represent decimal numbers?",
-                        "What is floating point arithmetic?",
-                        "Why does precision matter in ML?"
-                    ]
-                },
-                {
-                    id: 6,
-                    name: "Multi-Platform Serving",
-                    complexity: "medium",
-                    category: "Infrastructure",
-                    summary: "Running the same AI model across different hardware and cloud providers",
-                    eli5: "Imagine you're a chef who needs to cook the same recipe in three different kitchens—one with a gas stove, one electric, one with a fancy induction cooktop. You need the food to taste identical no matter which kitchen you're in. That's hard when each kitchen has slightly different quirks!",
-                    technical: "Anthropic serves Claude across AWS Trainium, NVIDIA GPUs, and Google TPUs, plus multiple distribution channels (Claude API, Amazon Bedrock, Google Cloud Vertex AI). Maintaining strict quality equivalence requires ensuring identical behavior despite hardware differences.",
-                    deep: "Different hardware platforms have different numerical behaviors, compilation pipelines, and optimization strategies. The three bugs manifested at different rates across platforms: the routing bug affected Claude API more than Bedrock/Vertex, while the TPU bugs only affected TPU-served requests. This platform variance created confusing signals during debugging, with some users experiencing issues while others didn't.",
-                    firstPrinciples: [
-                        "What are TPUs, GPUs, and custom AI accelerators?",
-                        "How does cloud infrastructure work?",
-                        "What does 'platform parity' mean?"
-                    ]
-                }
-            ],
-            timeline: [
-                { date: "August 5", event: "Bug 1 begins", description: "Context window routing error starts affecting 0.8% of Sonnet 4 requests", type: "bug-1" },
-                { date: "August 21", event: "Code deployment", description: "Update intended to improve token selection inadvertently triggers latent XLA bug", type: "bug-3" },
-                { date: "August 25", event: "Bug 2 & 3 start", description: "Output corruption begins on Opus models; XLA miscompilation affects TPU servers", type: "bug-2" },
-                { date: "August 29", event: "Load balancer change", description: "Routing bug impact dramatically worsens, now affecting 16% of Sonnet 4 requests at peak", type: "bug-1" },
-                { date: "September 2", event: "Bug 2 fixed", description: "Output corruption identified and rolled back for Sonnet 4", type: "fix" },
-                { date: "September 4", event: "Bug 1 fix deployed", description: "Routing logic fixed, beginning rollout", type: "fix" },
-                { date: "September 12", event: "Bug 3 fixed", description: "Switched from approximate to exact top-k, standardized fp32 precision", type: "fix" },
-                { date: "September 18", event: "Full resolution", description: "All fixes fully rolled out across all platforms", type: "fix" }
-            ],
-            quizzes: [
-                {
-                    question: "Why did the routing bug affect some users more than others for extended periods?",
-                    options: [
-                        { text: "Random load balancing distributed errors evenly", letter: "A" },
-                        { text: "'Sticky' routing kept affected users on problematic servers for follow-up requests", letter: "B" },
-                        { text: "Only premium users were affected", letter: "C" },
-                        { text: "The bug only occurred during peak hours", letter: "D" }
-                    ],
-                    correct: "B",
-                    explanation: "The routing had 'sticky' behavior, meaning once a user was routed to a misconfigured server, their subsequent requests in that session continued going to the same server. This is why approximately 30% of Claude Code users experienced at least one misrouted message—once hit, they stayed on the wrong path."
-                },
-                {
-                    question: "What was the root cause of the XLA:TPU miscompilation bug?",
-                    options: [
-                        { text: "A hardware failure in Google's TPU chips", letter: "A" },
-                        { text: "Precision mismatches between bf16 and fp32 in the approximate top-k operation", letter: "B" },
-                        { text: "Insufficient server memory", letter: "C" },
-                        { text: "Network latency issues", letter: "D" }
-                    ],
-                    correct: "B",
-                    explanation: "The bug involved mixed precision arithmetic where bf16 (used by Claude for efficiency) and fp32 (native to TPU vector processors) operations disagreed on which token had the highest probability. The 'approximate top-k' operation would sometimes return completely wrong results due to these precision inconsistencies."
-                },
-                {
-                    question: "Why was it difficult to detect these bugs through internal testing?",
-                    options: [
-                        { text: "Anthropic doesn't do internal testing", letter: "A" },
-                        { text: "The bugs only appeared on production hardware", letter: "B" },
-                        { text: "Internal benchmarks didn't capture the degradation, and privacy controls limited debugging access", letter: "C" },
-                        { text: "The bugs were too rare to measure", letter: "D" }
-                    ],
-                    correct: "C",
-                    explanation: "Two key factors: First, internal evaluations failed to capture the degradation users reported (partly because Claude recovers well from isolated errors). Second, privacy controls limiting engineer access to unreported user interactions prevented direct debugging. The platform variance created confusing contradictory reports."
-                },
-                {
-                    question: "What symptom did the output corruption bug cause?",
-                    options: [
-                        { text: "Responses were slower than normal", letter: "A" },
-                        { text: "Claude refused to answer questions", letter: "B" },
-                        { text: "Thai/Chinese characters appeared in English responses, and syntax errors in code", letter: "C" },
-                        { text: "Responses were truncated early", letter: "D" }
-                    ],
-                    correct: "C",
-                    explanation: "The output corruption bug caused the system to occasionally assign high probability to tokens that should rarely occur given context. This manifested as unexpected Thai/Chinese characters appearing in English responses, or syntax errors in generated code—essentially picking 'wrong' tokens that didn't belong."
-                },
-                {
-                    question: "What change did Anthropic make to fix the XLA precision bug permanently?",
-                    options: [
-                        { text: "Disabled all TPU usage", letter: "A" },
-                        { text: "Switched from approximate to exact top-k and standardized on fp32 precision", letter: "B" },
-                        { text: "Added more GPUs to handle load", letter: "C" },
-                        { text: "Reduced the model size", letter: "D" }
-                    ],
-                    correct: "B",
-                    explanation: "Anthropic switched from the approximate top-k operation (which was faster but had edge case bugs) to an exact top-k operation, and standardized operations on fp32 precision. They accepted a minor efficiency impact, prioritizing quality over speed."
-                }
-            ]
-        };
+        // ===== DYNAMIC DATA FROM API =====
+        let articleData = null;
 
         let currentStage = 1;
         let currentQuiz = 0;
@@ -2346,26 +2180,99 @@
             const loading = document.getElementById('loadingOverlay');
             loading.classList.add('active');
 
-            // Simulate loading steps
             const steps = loading.querySelectorAll('.loading-step');
-            for (let i = 0; i < steps.length; i++) {
-                await delay(800);
-                if (i > 0) steps[i-1].classList.remove('active');
-                if (i > 0) steps[i-1].classList.add('complete');
-                steps[i].classList.add('active');
-            }
-            await delay(800);
-            steps[steps.length - 1].classList.remove('active');
-            steps[steps.length - 1].classList.add('complete');
-            await delay(500);
+            steps[0].classList.add('active');
 
-            loading.classList.remove('active');
-            steps.forEach(s => {
-                s.classList.remove('active', 'complete');
+            try {
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+
+                for (let i = 1; i < steps.length; i++) {
+                    steps[i-1].classList.remove('active');
+                    steps[i-1].classList.add('complete');
+                    steps[i].classList.add('active');
+                    await delay(300);
+                }
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to analyze article');
+                }
+
+                const data = await response.json();
+                articleData = transformApiData(data);
+
+                steps[steps.length - 1].classList.remove('active');
+                steps[steps.length - 1].classList.add('complete');
+                await delay(300);
+
+                loading.classList.remove('active');
+                steps.forEach(s => s.classList.remove('active', 'complete'));
+
+                showReader();
+                initializeContent();
+            } catch (error) {
+                loading.classList.remove('active');
+                steps.forEach(s => s.classList.remove('active', 'complete'));
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function transformApiData(data) {
+            const concepts = data.concepts.map((c, idx) => ({
+                id: c.id || idx + 1,
+                name: c.name,
+                complexity: c.complexity || 'medium',
+                category: 'Concept',
+                summary: c.description,
+                eli5: c.analogy || c.description,
+                technical: c.description,
+                deep: c.description,
+                firstPrinciples: ['What is this concept?', 'Why does it matter?', 'How does it work?']
+            }));
+
+            const eli5Map = {};
+            (data.eli5_explanations || []).forEach(e => {
+                eli5Map[e.concept_name.toLowerCase()] = e;
             });
 
-            showReader();
-            initializeContent();
+            concepts.forEach(c => {
+                const eli5 = eli5Map[c.name.toLowerCase()];
+                if (eli5) {
+                    c.eli5 = eli5.simple_explanation;
+                    c.technical = eli5.real_world_example || c.description;
+                }
+            });
+
+            const quizzes = [];
+            if (data.quizzes && data.quizzes.length > 0) {
+                data.quizzes[0].questions.forEach(q => {
+                    const letters = ['A', 'B', 'C', 'D'];
+                    quizzes.push({
+                        question: q.question,
+                        options: q.options.map((opt, i) => ({ text: opt, letter: letters[i] })),
+                        correct: letters[q.options.indexOf(q.correct_answer)] || 'A',
+                        explanation: q.explanation
+                    });
+                });
+            }
+
+            return {
+                title: data.title,
+                source: data.source || 'Web Article',
+                summary: data.summary,
+                concepts: concepts,
+                timeline: [],
+                quizzes: quizzes.length > 0 ? quizzes : [{
+                    question: 'No quiz questions available',
+                    options: [{ text: 'Continue learning', letter: 'A' }],
+                    correct: 'A',
+                    explanation: 'Keep exploring the concepts!'
+                }]
+            };
         }
 
         function delay(ms) {
@@ -2385,6 +2292,7 @@
 
         function renderSidebarConcepts() {
             const list = document.getElementById('conceptsList');
+            if (!articleData || !articleData.concepts) return;
             list.innerHTML = articleData.concepts.map(c => `
                 <div class="concept-item" data-mastery="low" onclick="openConceptModal(${c.id})">
                     <span class="concept-icon">${c.name.charAt(0)}</span>
@@ -2395,7 +2303,15 @@
 
         function renderSummary() {
             const content = document.getElementById('summaryContent');
+            if (!articleData) return;
+            document.getElementById('articleTitle').textContent = articleData.title;
+            document.getElementById('metaSource').textContent = articleData.source || 'Web Article';
             typeText(content, articleData.summary, 10);
+            
+            if (articleData.concepts && articleData.concepts.length > 0) {
+                document.getElementById('feynmanTopic').textContent = 
+                    `Explain: ${articleData.concepts[0].name}`;
+            }
         }
 
         function renderConceptsGrid() {
@@ -2562,43 +2478,61 @@
             document.getElementById('wordCount').textContent = words;
         }
 
-        function submitFeynman() {
+        async function submitFeynman() {
             const text = document.getElementById('feynmanTextarea').value;
             if (!text.trim()) return;
 
             const feedback = document.getElementById('aiFeedback');
             const body = document.getElementById('aiFeedbackBody');
+            const topic = document.getElementById('feynmanTopic').textContent;
 
-            // Simulated AI feedback
-            body.innerHTML = `
-                <div class="feedback-section strengths">
-                    <h5>✓ Strengths</h5>
-                    <ul>
-                        <li>Good use of simple language to explain complex concepts</li>
-                        <li>Connected the bugs to real-world impact on users</li>
-                        <li>Showed understanding of the cause-and-effect chain</li>
-                    </ul>
-                </div>
-                <div class="feedback-section gaps">
-                    <h5>⚠ Knowledge Gaps Detected</h5>
-                    <ul>
-                        <li>Consider explaining WHY precision differences matter in more detail</li>
-                        <li>The relationship between XLA compilation and token selection could be clearer</li>
-                        <li>Try adding an analogy for the "sticky routing" concept</li>
-                    </ul>
-                </div>
-                <div class="feedback-section suggestions">
-                    <h5>→ Suggestions to Deepen Understanding</h5>
-                    <ul>
-                        <li>Review the concept of floating-point precision—this is fundamental to the bug</li>
-                        <li>Try explaining the timeline of events to reinforce the sequence</li>
-                        <li>Consider: How would YOU have detected these bugs earlier?</li>
-                    </ul>
-                </div>
-            `;
-
+            body.innerHTML = '<p>Analyzing your explanation...</p>';
             feedback.classList.add('visible');
-            updateRetention(90);
+
+            try {
+                const response = await fetch('/api/feynman-feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        explanation: text,
+                        concept_name: topic,
+                        original_description: articleData ? articleData.summary : ''
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to get feedback');
+                }
+
+                const data = await response.json();
+
+                body.innerHTML = `
+                    <div class="feedback-section strengths">
+                        <h5>✓ Strengths</h5>
+                        <ul>
+                            ${(data.strengths || []).map(s => `<li>${s}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <div class="feedback-section gaps">
+                        <h5>⚠ Knowledge Gaps Detected</h5>
+                        <ul>
+                            ${(data.gaps || []).map(g => `<li>${g}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <div class="feedback-section suggestions">
+                        <h5>→ Suggestions to Deepen Understanding</h5>
+                        <ul>
+                            ${(data.suggestions || []).map(s => `<li>${s}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <p style="margin-top: 1rem; padding: 1rem; background: var(--bg-tertiary);">
+                        <strong>Understanding Score:</strong> ${data.understanding_score || 0}%
+                    </p>
+                `;
+                updateRetention(Math.min(90, (data.understanding_score || 50)));
+            } catch (error) {
+                body.innerHTML = '<p>Error getting feedback. Please try again.</p>';
+            }
         }
 
         // ===== CONCEPT MODAL =====
