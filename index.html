@@ -6,7 +6,7 @@
     <title>DEEP READER — Master Complex Knowledge</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-primary: #F5F0E8;
@@ -374,6 +374,105 @@
         .landing-hero h1 em {
             font-style: italic;
             color: var(--accent-coral);
+        }
+
+        /* Animated Handwritten Text */
+        .animated-text-container {
+            display: block;
+            min-height: 1.4em;
+            position: relative;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.45em;
+            font-weight: 400;
+            color: var(--text-secondary);
+            margin-top: 0.8rem;
+            letter-spacing: 0;
+        }
+
+        .animated-word {
+            font-family: 'Caveat', cursive;
+            font-weight: 700;
+            font-size: 2.2em;
+            color: var(--accent-coral);
+            display: inline-block;
+            position: relative;
+            vertical-align: middle;
+            line-height: 1;
+        }
+
+        .animated-word::after {
+            content: '|';
+            position: absolute;
+            right: -4px;
+            animation: cursorBlink 0.7s infinite;
+            color: var(--accent-coral);
+            font-weight: 400;
+        }
+
+        .animated-word.typing-complete::after {
+            display: none;
+        }
+
+        @keyframes cursorBlink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
+        /* SVG Drawing Animation (for future full implementation) */
+        .handwriting-svg {
+            display: inline-block;
+            height: 1.2em;
+            vertical-align: middle;
+        }
+
+        .handwriting-svg path {
+            fill: none;
+            stroke: var(--accent-coral);
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* Word fade animation */
+        @keyframes wordFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes wordFadeOut {
+            from {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+        }
+
+        .animated-word.fade-in {
+            animation: wordFadeIn 0.3s ease forwards;
+        }
+
+        .animated-word.fade-out {
+            animation: wordFadeOut 0.3s ease forwards;
+        }
+
+        /* Reduced motion support */
+        @media (prefers-reduced-motion: reduce) {
+            .animated-word::after {
+                animation: none;
+            }
+            .animated-word.fade-in,
+            .animated-word.fade-out {
+                animation: none;
+            }
         }
 
         .landing-hero p {
@@ -1817,7 +1916,12 @@
             <!-- Landing View -->
             <div class="landing-view" id="landingView">
                 <div class="landing-hero">
-                    <h1>Master <em>Complex</em> Knowledge</h1>
+                    <h1>
+                        Master <em>Complex</em> Knowledge
+                        <span class="animated-text-container">
+                            Deep Reader is <span class="animated-word" id="animatedWord"></span>
+                        </span>
+                    </h1>
                     <p>
                         Transform any technical article into a deep learning experience.
                         Using the Feynman Technique, we'll help you truly understand—not just read—
@@ -2723,8 +2827,82 @@
             }
         });
 
+        // ===== ANIMATED TEXT (Like Matt Palmer's site) =====
+        const animatedWords = [
+            'transforming learning',
+            'building understanding',
+            'making you smarter',
+            'unlocking insights',
+            'teaching deeply'
+        ];
+
+        let currentWordIndex = 0;
+        let isDeleting = false;
+        let charIndex = 0;
+        let typingSpeed = 80;
+        let deletingSpeed = 40;
+        let pauseBetweenWords = 2000;
+        let pauseAfterTyping = 1500;
+
+        function typeAnimatedWord() {
+            const wordElement = document.getElementById('animatedWord');
+            if (!wordElement) return;
+
+            const currentWord = animatedWords[currentWordIndex];
+
+            if (!isDeleting) {
+                // Typing
+                wordElement.textContent = currentWord.substring(0, charIndex + 1);
+                charIndex++;
+
+                if (charIndex === currentWord.length) {
+                    // Finished typing, pause then start deleting
+                    wordElement.classList.add('typing-complete');
+                    setTimeout(() => {
+                        wordElement.classList.remove('typing-complete');
+                        isDeleting = true;
+                        typeAnimatedWord();
+                    }, pauseAfterTyping);
+                    return;
+                }
+
+                setTimeout(typeAnimatedWord, typingSpeed);
+            } else {
+                // Deleting
+                wordElement.textContent = currentWord.substring(0, charIndex - 1);
+                charIndex--;
+
+                if (charIndex === 0) {
+                    // Finished deleting, move to next word
+                    isDeleting = false;
+                    currentWordIndex = (currentWordIndex + 1) % animatedWords.length;
+                    setTimeout(typeAnimatedWord, pauseBetweenWords / 4);
+                    return;
+                }
+
+                setTimeout(typeAnimatedWord, deletingSpeed);
+            }
+        }
+
+        // Start the animation after a short delay
+        function initAnimatedText() {
+            // Check for reduced motion preference
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                // Just show the first word without animation
+                const wordElement = document.getElementById('animatedWord');
+                if (wordElement) {
+                    wordElement.textContent = animatedWords[0];
+                    wordElement.classList.add('typing-complete');
+                }
+                return;
+            }
+
+            setTimeout(typeAnimatedWord, 500);
+        }
+
         // ===== INIT =====
         initTheme();
+        initAnimatedText();
     </script>
 </body>
 </html>
